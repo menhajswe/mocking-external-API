@@ -49,55 +49,52 @@ Add these dependencies to your `pom.xml`:
 
 ## **Implementing the API Clients**
 
-### **1. Comment Model**
-Using a **Java record** for an immutable data structure:
-```java
-public record Comment(int postId, int id, String name, String email, String body) {
-}
+### Modeling Java Objects
+First, we need to inspect the API response, then create an java object that matches the response data. We are doing this,
+so we can process the data in java data-structure. Let's see the request and responses from jsoanplaceholder API.
+<br>
+Given: `curl -X GET "https://jsonplaceholder.typicode.com/posts/1"`
+</br>
+Returned response:
+  ```
+  {
+      "userId": 1,
+      "id": 1,
+      "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+      "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+  }
+  ```
+And visiting: `curl -X GET "https://jsonplaceholder.typicode.com/comments/1"` <br>
+returns the following response:
 ```
+   {
+      "postId": 1,
+      "id": 1,
+      "name": "id labore ex et quam laborum",
+      "email": "Eliseo@gardner.biz",
+      "body": "laudantium enim quasi est quidem magnam voluptate ipsam eos\ntempora quo necessitatibus\ndolor quam autem quasi\nreiciendis et nam sapiente accusantium"
+   }
+```
+A good option for processing API data is java records, instead of classes. Let's create a java record that matches the API
+response.
 
-### **2. Post Model**
+### **1. Post Model**
 Similarly, the **Post** model:
 ```java
 public record Post(int userId, int id, String title, String body) {
 }
 ```
 
-### **3. Comment Client (Fetching Comments from API)**
+### **2. Comment Model**
+Using a **Java record** for an immutable data structure:
 ```java
-package services;
-
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import models.Comment;
-
-import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.util.List;
-
-public class CommentClient {
-   public List<Comment> getComments() throws URISyntaxException, IOException, InterruptedException {
-      HttpClient commentClient = HttpClient.newHttpClient();
-      HttpRequest request = HttpRequest.newBuilder()
-              .uri(new URI("https://jsonplaceholder.typicode.com/comments"))
-              .GET()
-              .build();
-      HttpResponse<String> response = commentClient.send(request, HttpResponse.BodyHandlers.ofString());
-      commentClient.close();
-      ObjectMapper mapper = new ObjectMapper();
-      return mapper.readValue(response.body(), new TypeReference<List<Comment>>() {});
-   }
+public record Comment(int postId, int id, String name, String email, String body) {
 }
 ```
+One way to handle request and response using java is HttpClient library. This will handle our HttpRequest and HttpResponse.
 
-### **4. Post Client (Fetching Posts from API)**
+### **3. Post Client (Fetching Posts from API)**
 ```java
-package services;
-
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import models.Post;
@@ -125,13 +122,62 @@ public class PostClient {
 }
 ```
 
+### **4. Comment Client (Fetching Comments from API)**
+```java
+package services;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import models.Comment;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.List;
+
+public class CommentClient {
+   public List<Comment> getComments() throws URISyntaxException, IOException, InterruptedException {
+      HttpClient commentClient = HttpClient.newHttpClient();
+      HttpRequest request = HttpRequest.newBuilder()
+              .uri(new URI("https://jsonplaceholder.typicode.com/comments"))
+              .GET()
+              .build();
+      HttpResponse<String> response = commentClient.send(request, HttpResponse.BodyHandlers.ofString());
+      commentClient.close();
+      ObjectMapper mapper = new ObjectMapper();
+      return mapper.readValue(response.body(), new TypeReference<>() {});
+   }
+}
+```
+
 ---
+Often, you will have a class that will handle and process the client responses. For instance, if you fetch data from Alaska Airlines
+in your application, then you would want to process that data according your own application or need. An API response 
+could return unnecessary data, therefore, you many need to filter them. For instance, in this example, jsonpalceholder's post API
+and comments' API returns two sets of json data. To create a relationship between posts and comments, I created teh following class,
+which maps posts-id to comment's post-id. In terms fo SQL, it is post's primary key is linked to comment's foreign key.
+```
+post-table
+   post-id primary key,
+   post
+```
+<br>
+
+``` 
+comment-table
+   comment-id primary key,
+   comment,
+   postId foreign key
+   
+```
+Now, we will link the post-id to comment-postId
 
 ## **Binding Posts and Comments**
 We now create a **PostAndCommentBinder** that maps **Posts** to their corresponding **Comments**:
 ```java
-package services;
-
 import models.Comment;
 import models.Post;
 
@@ -151,6 +197,8 @@ public class PostAndCommentBinder {
    }
 
    public Map<Post, List<Comment>> fetchData() throws URISyntaxException, IOException, InterruptedException {
+      // Notice: The following two lines will fetch the data. These will make actual API requests.
+      // We want to mock these requests during our testing.
       List<Post> posts = postClient.getPosts();
       List<Comment> comments = commentClient.getComments();
 
@@ -194,28 +242,27 @@ public class TestPostAndCommentBinder {
    private PostAndCommentBinder binder;
 
    @Mock
-   private PostClient postClient;
+   private PostClient postClient; // Mocking this service to avoid actual API requests. 
    @Mock
-   private CommentClient commentClient;
+   private CommentClient commentClient; // The same thing, mocking it to prevent httpclient request/response.
 
-   private AutoCloseable mocks;
+   private AutoCloseable mocks; // An object that may hold resources (such as file or socket handles) until it is closed
 
    @BeforeEach
    void setUp() {
       mocks = MockitoAnnotations.openMocks(this);
-      binder = new PostAndCommentBinder(postClient, commentClient);
+      binder = new PostAndCommentBinder(postClient, commentClient); // Passing the mocked objects
    }
 
    @Test
    public void testPostAndComment() throws URISyntaxException, IOException, InterruptedException {
-      Post post = new Post(1, 1, "Test Post", "This is a test post.");
-      Comment comment = new Comment(1, 1, "John Doe", "john@example.com", "This is a test comment.");
+      Post post = new Post(1, 1, "Test Post", "This is a test post."); // Expected mocked-post
+      Comment comment = new Comment(1, 1, "John Doe", "john@example.com", "This is a test comment."); // Expected mocked-comment
       Map<Post, List<Comment>> mockedData = Map.of(post, List.of(comment));
-
+      // when binder class calls on postClient.getPost() to retrieve data, mockito will return the created mocked objects which are the expected response. 
       when(postClient.getPosts()).thenReturn(List.of(post));
       when(commentClient.getComments()).thenReturn(List.of(comment));
-
-      Map<Post, List<Comment>> result = binder.fetchData();
+      Map<Post, List<Comment>> result = binder.fetchData(); // returns mocked data
       System.out.println("Test values: " + result);
       assert !result.isEmpty();
    }
@@ -260,4 +307,5 @@ public class TestPostAndCommentBinder {
    ```sh
    mvn clean test
    ``` # mocking-external-API
-# mocking-external-API
+# Feedback
+Please feel free to leave comments or question.
