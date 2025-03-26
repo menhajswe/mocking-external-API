@@ -260,3 +260,4 @@ public class TestPostAndCommentBinder {
    ```sh
    mvn clean test
    ``` # mocking-external-API
+# mocking-external-API
